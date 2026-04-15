@@ -19,7 +19,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .hdr-dist-name{font-size:1rem;font-weight:600;opacity:.95}
 .hdr-dist-year{display:inline-block;font-size:.75rem;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.2);border-radius:10px;padding:2px 10px;margin-top:5px;letter-spacing:.3px}
 /* ── Chat area ── */
-.chat-wrap{flex:1;overflow-y:auto;padding:20px 24px;display:flex;flex-direction:column;gap:14px;background:transparent}
+.chat-wrap{flex:1;overflow-y:auto;padding:20px max(24px,calc((100% - 960px) / 2));display:flex;flex-direction:column;gap:14px;background:transparent}
 /* ── Message bubbles ── */
 .msg{display:flex;gap:10px;max-width:90%}
 .msg.user{align-self:flex-end;flex-direction:row-reverse}
@@ -316,7 +316,7 @@ function detect(q) {
   const partKw   = () => has('participat','attendance','rate','how many eat','who eat');
   const trendKw  = () => has('trend','over time','monthly','by month','history','chart','graph','plot');
   const depKw    = () => has('deposit','payment','paid into','loaded','online pay','put money','fund','add money','top up');
-  const feeKw    = () => has('fee','fees','charge','collect','revenue','field trip','athletic','yearbook','prom','parking','course fee','ap exam','cap and gown','graduation','band','orchestra','picture','supply','after school','before school','program');
+  const feeKw    = () => has('fee','fees','charge','collect','revenue','sales','income','earned','brought in','field trip','athletic','yearbook','prom','parking','course fee','ap exam','cap and gown','graduation','band','orchestra','picture','supply','after school','before school','program');
   const ftKw     = () => has('field trip','trip');
   const athKw    = () => has('athlet','sport');
   const ybKw     = () => has('yearbook');
@@ -347,11 +347,11 @@ function detect(q) {
 
   // Negative balances
   if (negKw()) {
-    if (school && school.multi) return {intent:'neg_group', school, n};
-    if (school && !school.multi) return {intent:'neg_school', school, n};
+    if (school && school.multi) return {intent:'neg_group', school, n, dateRange};
+    if (school && !school.multi) return {intent:'neg_school', school, n, dateRange};
     // "show/list/top N students" type → individual list; school comparison → school ranking
-    if (has('student','who has','names','pull','give me')) return {intent:'neg_list', n};
-    if (!compareKw() && has('show','list','top')) return {intent:'neg_list', n};
+    if (has('student','who has','names','pull','give me')) return {intent:'neg_list', n, dateRange};
+    if (!compareKw() && has('show','list','top')) return {intent:'neg_list', n, dateRange};
     return {intent:'neg_compare'};
   }
 
@@ -450,12 +450,16 @@ handlers.neg_compare = () => {
 };
 
 // ── NEGATIVE — SPECIFIC SCHOOL ────────────────────────────────
-handlers.neg_school = ({school, n=10}) => {
+handlers.neg_school = ({school, n=10, dateRange}) => {
   const allNeg = negStudents.filter(s => s.schoolId === school.id);
   const limit  = n >= 999 ? allNeg.length : Math.min(n, allNeg.length);
   const stus   = allNeg.slice(0, limit);
   const totalOwed = allNeg.reduce((a,s)=>a+s.balance,0);
   let html = `<p><strong>${school.name}</strong> has <strong>${school.negativeBalanceCount} students</strong> with negative meal balances totaling <strong>${fmt$(totalOwed)}</strong>.</p>`;
+  if (dateRange) {
+    const rangeLabel = dateRange.start===dateRange.end ? formatMonth(dateRange.start) : `${formatMonth(dateRange.start)} – ${formatMonth(dateRange.end)}`;
+    html += `<div class="insight warn">⚠️ Student balance rankings reflect <strong>cumulative balances for the full school year</strong> — not a snapshot for ${rangeLabel} specifically. Individual monthly balance histories aren't stored in this dataset, so the ranking is the same regardless of the month you specify.</div>`;
+  }
   html += `<div class="sec-head">Top ${limit} Students by Meal Debt — ${school.name}</div>`;
   const rows = stus.map((s,i) => [
     `<span class="rank-num">#${i+1}</span>`,
@@ -471,10 +475,14 @@ handlers.neg_school = ({school, n=10}) => {
 };
 
 // ── NEGATIVE — LIST (district-wide top) ──────────────────────
-handlers.neg_list = ({n=10}={}) => {
+handlers.neg_list = ({n=10, dateRange}={}) => {
   const limit = n >= 999 ? negStudents.length : Math.min(n, negStudents.length);
   const top   = negStudents.slice(0, limit);
   let html = `<p>Here are the <strong>top ${limit} students district-wide</strong> ranked by meal debt:</p>`;
+  if (dateRange) {
+    const rangeLabel = dateRange.start===dateRange.end ? formatMonth(dateRange.start) : `${formatMonth(dateRange.start)} – ${formatMonth(dateRange.end)}`;
+    html += `<div class="insight warn">⚠️ Student balance rankings reflect <strong>cumulative balances for the full school year</strong> — not a snapshot for ${rangeLabel} specifically. Individual monthly balance histories aren't stored in this dataset, so the ranking is the same regardless of the month you specify.</div>`;
+  }
   const rows = top.map((s,i) => {
     const sch = schoolById[s.schoolId];
     return [
