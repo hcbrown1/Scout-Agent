@@ -35,8 +35,12 @@ strong{color:#111}
 .user .bubble strong{color:white}
 /* ── Stat grid ── */
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin:10px 0}
-.stat-card{background:rgba(255,255,255,.9);backdrop-filter:blur(8px);border-radius:10px;padding:12px 16px;text-align:center;box-shadow:0 1px 4px rgba(18,41,79,.1);border:1px solid rgba(18,41,79,.08);transition:transform .15s}
+.stat-card{background:rgba(255,255,255,.9);backdrop-filter:blur(8px);border-radius:10px;padding:12px 16px;text-align:center;box-shadow:0 1px 4px rgba(18,41,79,.1);border:1px solid rgba(18,41,79,.08);transition:all .15s}
 .stat-card:hover{transform:translateY(-1px)}
+.stat-card.clickable{cursor:pointer;position:relative}
+.stat-card.clickable:hover{transform:translateY(-2px);box-shadow:0 4px 14px rgba(37,99,168,.22);border-color:rgba(37,99,168,.35);background:rgba(239,246,255,.97)}
+.stat-card.clickable::after{content:'↗';position:absolute;top:5px;right:7px;font-size:.65rem;color:#93C5FD;opacity:0;transition:opacity .15s}
+.stat-card.clickable:hover::after{opacity:1}
 .stat-val{font-size:1.3rem;font-weight:700;color:#12294F;word-break:break-word;line-height:1.2}
 .stat-val.neg{color:#DC2626}
 .stat-val.pos{color:#059669}
@@ -154,6 +158,17 @@ const fmt$pos = v => '$' + Math.abs(v).toLocaleString('en-US',{minimumFractionDi
 const fmtPct = v => (v*100).toFixed(1) + '%';
 const fmtN = v => v.toLocaleString();
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// statCard(val, label, query, valClass) — clickable when query provided
+function statCard(val, lbl, query, cls) {
+  if (query) {
+    const q = esc(query);
+    const vc = cls ? ' ' + cls : '';
+    return `<div class="stat-card clickable" onclick="submitQuery('${q}')" title="Click to explore"><div class="stat-val${vc}">${val}</div><div class="stat-lbl">${lbl}</div></div>`;
+  }
+  const vc = cls ? ' ' + cls : '';
+  return `<div class="stat-card"><div class="stat-val${vc}">${val}</div><div class="stat-lbl">${lbl}</div></div>`;
+}
 
 function table(headers, rows, opts={}) {
   let cls = opts.cls || '';
@@ -342,6 +357,9 @@ function detect(q) {
     if (name) return {intent:'student_search', searchTerm:name, school};
   }
 
+  // Enrollment by school
+  if (has('enroll') && compareKw()) return {intent:'enrollment_compare'};
+
   // Overview / dashboard
   if (summKw() && !negKw() && !frKw() && !brkKw() && !lunchKw() && !depKw()) return {intent:'overview', school};
 
@@ -378,6 +396,7 @@ function detect(q) {
     if (dateRange) return {intent:'deposit_daterange', dateRange, school};
     if (trendKw()) return {intent:'deposit_trend'};
     if (school && !school.multi) return {intent:'deposit_school', school};
+    if (compareKw()) return {intent:'deposit_compare'};
     return {intent:'deposit_total'};
   }
 
@@ -409,18 +428,60 @@ function detect(q) {
 const handlers = {};
 
 // ── OVERVIEW ──────────────────────────────────────────────────
+// ── ENROLLMENT BY SCHOOL ─────────────────────────────────────
+handlers.enrollment_compare = () => {
+  const sorted = [...schools].sort((a,b) => b.enrollment - a.enrollment);
+  let html = `<p>There are <strong>${fmtN(districtTotals.enrollment)} students</strong> enrolled across all <strong>${schools.length} schools</strong> in Maplewood USD.</p>`;
+  html += `<div class="sec-head">Enrollment by School</div>`;
+  const rows = sorted.map((s,i) => [
+    `<span class="rank-num">#${i+1}</span>`,
+    esc(s.name), s.type.charAt(0).toUpperCase()+s.type.slice(1),
+    fmtN(s.enrollment),
+    fmtPct(s.enrollment/districtTotals.enrollment),
+  ]);
+  html += table(['','School','Type','Students','% of District'], rows);
+  setChartData({title:'Enrollment by School',labels:sorted.map(s=>s.name),datasets:[{label:'Students',data:sorted.map(s=>s.enrollment)}]});
+  return html;
+};
+
+// ── MEAL DEPOSITS BY SCHOOL ───────────────────────────────────
+handlers.deposit_compare = () => {
+  const sorted = [...schools].sort((a,b) => {
+    const da = DATA.mealPaymentSummaryBySchool[a.id]||{total:0,count:0};
+    const db = DATA.mealPaymentSummaryBySchool[b.id]||{total:0,count:0};
+    return db.total - da.total;
+  });
+  const grandTotal = sorted.reduce((a,s) => a+(DATA.mealPaymentSummaryBySchool[s.id]||{total:0}).total, 0);
+  let html = `<p>District-wide meal deposits total <strong>${fmt$pos(grandTotal)}</strong> for the 2024–2025 school year.</p>`;
+  html += `<div class="sec-head">Meal Deposits YTD by School</div>`;
+  const rows = sorted.map((s,i) => {
+    const d = DATA.mealPaymentSummaryBySchool[s.id]||{total:0,count:0};
+    return [
+      `<span class="rank-num">#${i+1}</span>`,
+      esc(s.name), s.type.charAt(0).toUpperCase()+s.type.slice(1),
+      fmtN(s.enrollment),
+      fmtN(d.count),
+      `<span class="pos-amt">${fmt$pos(d.total)}</span>`,
+    ];
+  });
+  html += table(['','School','Type','Enrolled','# Deposits','Amount YTD'], rows);
+  setChartData({title:'Meal Deposits YTD by School',labels:sorted.map(s=>s.name),datasets:[{label:'Deposits ($)',data:sorted.map(s=>(DATA.mealPaymentSummaryBySchool[s.id]||{total:0}).total)}]});
+  return html;
+};
+
+// ── OVERVIEW / DASHBOARD ──────────────────────────────────────
 handlers.overview = () => {
   const t = districtTotals;
   const frRate = ((t.free+t.reduced)/t.enrollment*100).toFixed(1);
   const negPct = (t.negative/t.enrollment*100).toFixed(1);
   let html = `<p>Here's a current snapshot of <strong>Maplewood Unified School District</strong> for the 2024–2025 school year:</p>`;
   html += `<div class="stat-grid">
-    <div class="stat-card"><div class="stat-val">${fmtN(t.enrollment)}</div><div class="stat-lbl">Total Students</div></div>
-    <div class="stat-card"><div class="stat-val neg">${fmtN(t.negative)}</div><div class="stat-lbl">Negative Balances</div></div>
-    <div class="stat-card"><div class="stat-val">${frRate}%</div><div class="stat-lbl">Free & Reduced Rate</div></div>
-    <div class="stat-card"><div class="stat-val pos">${fmtM(t.totalDeposits)}</div><div class="stat-lbl">Meal Deposits YTD</div></div>
-    <div class="stat-card"><div class="stat-val pos">${fmtM(t.totalFees)}</div><div class="stat-lbl">Fees Collected YTD</div></div>
-    <div class="stat-card"><div class="stat-val">${schools.length}</div><div class="stat-lbl">Schools</div></div>
+    ${statCard(fmtN(t.enrollment), 'Total Students', 'enrollment by school')}
+    ${statCard(fmtN(t.negative), 'Negative Balances', 'negative balances by school', 'neg')}
+    ${statCard(frRate+'%', 'Free & Reduced Rate', 'free and reduced rate by school')}
+    ${statCard(fmtM(t.totalDeposits), 'Meal Deposits YTD', 'meal deposits by school', 'pos')}
+    ${statCard(fmtM(t.totalFees), 'Fees Collected YTD', 'fees collected by school', 'pos')}
+    ${statCard(schools.length, 'Schools', '')}
   </div>`;
   const topNeg = [...schools].sort((a,b) => b.negativeBalanceCount - a.negativeBalanceCount)[0];
   const topFR  = [...schools].sort((a,b) => (b.freeRate+b.reducedRate) - (a.freeRate+a.reducedRate))[0];
@@ -950,10 +1011,10 @@ handlers.fallback = ({school}) => {
     const s = school;
     return `<p>Here's a quick overview for <strong>${s.name}</strong>:</p>
     <div class="stat-grid">
-      <div class="stat-card"><div class="stat-val">${fmtN(s.enrollment)}</div><div class="stat-lbl">Enrolled</div></div>
-      <div class="stat-card"><div class="stat-val neg">${fmtN(s.negativeBalanceCount)}</div><div class="stat-lbl">Negative Balances</div></div>
-      <div class="stat-card"><div class="stat-val">${fmtPct(s.freeRate+s.reducedRate)}</div><div class="stat-lbl">F/R Rate</div></div>
-      <div class="stat-card"><div class="stat-val">${fmtPct(s.lunchParticipationRate)}</div><div class="stat-lbl">Lunch Part.</div></div>
+      ${statCard(fmtN(s.enrollment), 'Enrolled', 'enrollment by school')}
+      ${statCard(fmtN(s.negativeBalanceCount), 'Negative Balances', 'negative balances at ' + s.name, 'neg')}
+      ${statCard(fmtPct(s.freeRate+s.reducedRate), 'F/R Rate', 'free and reduced at ' + s.name)}
+      ${statCard(fmtPct(s.lunchParticipationRate), 'Lunch Part.', 'lunch participation at ' + s.name)}
     </div>
     <p style="color:#6B7280;font-size:.8rem;margin-top:8px">I can answer more specific questions about this school's balances, participation, payments, or fees. What would you like to know?</p>`;
   }
